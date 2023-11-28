@@ -34,10 +34,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define R_PRECHARGE 1000 // Precharge resistance in ohms
+#define R_PRECHARGE 1000000
+// Precharge resistance in ohms
 #define C_PRECHARGE 10e-6 // Precharge capacitance in farads
 #define V_SUPPLY 3.0 // Supply voltage in Volts
-#define V_THRESHOLD 0.6 * V_SUPPLY // Voltage threshold for error condition
+#define V_THRESHOLD 0.5 * V_SUPPLY // Voltage threshold for error condition
 #define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE) // RC time constant
 
 /* USER CODE END PD */
@@ -56,6 +57,8 @@ uint16_t adc_data;
 char errMsg[100];
 char succMsg[100];
 int switchon = 0;
+char msg2 [50];
+char msg [20];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +78,8 @@ void ConfigureVoltageSourcePin();
 float adcValtoVolts (uint16_t adcVal);
 void LED_init(void);
 void switchpressed(void);
+void Voltage_Measurement(void);
+void printTimestamp(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -115,6 +120,7 @@ int main(void)
   ConfigureVoltageSourcePin();
   adc_init();
   LED_init();
+  GPIOC->ODR |= 0x02;  // Turn off the precharge relay (pnp transistor)
 
   /* USER CODE END 2 */
 
@@ -124,15 +130,15 @@ int main(void)
   {
 
     /* USER CODE END WHILE */
-//	  GPIOC->ODR ^= 0x02; // Turn on the relay
-//	  DelayMS(10000);
-	  GPIOC->ODR |= 0x02;  // Turn off the precharge relay (pnp transistor)
-	  switchpressed();
-	  if (switchon){
-	      // Start the precharge process
-		  Precharge();
-	  }
-	  DelayMS(200);
+
+//	  switchpressed();
+//	  if (switchon){
+//	      // Start the precharge process
+//		  Precharge();
+//	  }
+	  Precharge();
+	  Voltage_Measurement();
+	  DelayMS(100);
 
 
     /* USER CODE BEGIN 3 */
@@ -302,11 +308,13 @@ void Precharge(void) {
     	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor)
         sprintf(errMsg, "Error: Check Connection Vol = %.3f V ", Vin);
         HAL_UART_Transmit(&huart2, (uint8_t*)errMsg, strlen(errMsg), 200);
-        while (1); // Infinite loop to stop further execution
+        GPIOD->ODR ^= 0x8000;
+        DelayMS(200);
     }else {
         GPIOC->ODR &= ~(GPIO_ODR_ODR_1); // Turn on the relay
         sprintf(succMsg, "Success: Good Connection Vol = %.3f V ", Vin);
         HAL_UART_Transmit(&huart2, (uint8_t*)succMsg, strlen(succMsg), 200);
+        GPIOD->ODR &= 0xffff7fff;
     }
 }
 
@@ -337,6 +345,7 @@ void adc_init(void) {
 
     // Configure PB1 as analog input
     GPIOB->MODER |= GPIO_MODER_MODER1; // Analog mode
+    GPIOB->OTYPER |= GPIO_OTYPER_OT1; // Open Drain PB1
 
     // Configure ADC settings
     ADC1->CR1 &= ~ADC_CR1_RES; // Clear the RES bits for 12-bit resolution
@@ -422,6 +431,22 @@ void SysTick_Handler(void) {
     } else {
         counter++; // Increment the counter
     }
+}
+void Voltage_Measurement(void){
+	  adc_data = read_adc(9);
+	  // Voltage Measurement 30V
+	  float Vin = (adc_data*(2.9)/4095.0);
+//			  Vin = Vin*(30.0/2.72); //Correction for Voltage divider
+	  Vin += (0.6/30.0)*Vin; //Correction using observation
+	  sprintf(msg2, " Vol = %.3f V ", Vin);
+	  printTimestamp();
+	  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
+}
+
+
+void printTimestamp(void) {
+	sprintf(msg, "   Time = %lu ms:", counter);
+	HAL_UART_Transmit(&huart2, (uint8_t*)(msg), strlen(msg), 200);
 }
 /* USER CODE END 4 */
 
