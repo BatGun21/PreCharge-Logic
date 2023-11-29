@@ -37,7 +37,7 @@
 #define R_PRECHARGE 1000000
 // Precharge resistance in ohms
 #define C_PRECHARGE 10e-6 // Precharge capacitance in farads
-#define V_SUPPLY 3.0 // Supply voltage in Volts
+#define V_SUPPLY 30.0 // Supply voltage in Volts
 #define V_THRESHOLD 0.5 * V_SUPPLY // Voltage threshold for error condition
 #define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE) // RC time constant
 
@@ -241,6 +241,8 @@ static void MX_GPIO_Init(void)
 
 float adcValtoVolts (uint16_t adcVal){
 	float Vin = (adcVal/4096.0)*2.9;
+	Vin = Vin*(30.0/1.69); //Correction for Voltage divider
+	Vin += (0.6/30.0)*Vin; //Correction using observation
 	return Vin;
 }
 
@@ -264,16 +266,6 @@ void switchpressed(void){
 		 }
 	}
 }
-
-//void EXTI0_1_IRQHandler(void) {
-//    if (EXTI->PR & EXTI_PR_PR0) { // Check if EXTI Line 0 triggered the interrupt
-//
-//        EXTI->PR = EXTI_PR_PR0; // Clear the interrupt pending bit by writing '1' to it
-//    }
-//}
-
-
-
 
 void Switch_init (void){
 	  /*----- USER Switch INIT -----*/
@@ -332,7 +324,7 @@ void ConfigureVoltageSourcePin() {
     GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR1;
 
     // Configure PC1 as pull-up
-    GPIOC->PUPDR &= 0x04;
+    GPIOC->PUPDR |= 0x04;
 
 }
 
@@ -432,12 +424,10 @@ void SysTick_Handler(void) {
         counter++; // Increment the counter
     }
 }
+
 void Voltage_Measurement(void){
-	  adc_data = read_adc(9);
-	  // Voltage Measurement 30V
-	  float Vin = (adc_data*(2.9)/4095.0);
-//			  Vin = Vin*(30.0/2.72); //Correction for Voltage divider
-	  Vin += (0.6/30.0)*Vin; //Correction using observation
+	  uint16_t adcVal = read_adc(9);
+	  float Vin = adcValtoVolts(adcVal);
 	  sprintf(msg2, " Vol = %.3f V ", Vin);
 	  printTimestamp();
 	  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
