@@ -34,7 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define R_PRECHARGE 1000000
+#define R_PRECHARGE 10000
 // Precharge resistance in ohms
 #define C_PRECHARGE 10e-6 // Precharge capacitance in farads
 #define V_SUPPLY 30.0 // Supply voltage in Volts
@@ -241,7 +241,8 @@ static void MX_GPIO_Init(void)
 
 float adcValtoVolts (uint16_t adcVal){
 	float Vin = (adcVal/4096.0)*2.9;
-	Vin = Vin*(30.0/1.69); //Correction for Voltage divider
+//	Vin = Vin*(48.0/2.70); //Correction for Voltage divider for 48V
+	Vin = Vin*(30.0/1.69); //Correction for Voltage divider for 30V
 	Vin += (0.6/30.0)*Vin; //Correction using observation
 	return Vin;
 }
@@ -292,8 +293,8 @@ void Precharge(void) {
 
 	uint16_t adcVal = read_adc(9);
 	float Vin = adcValtoVolts(adcVal);
-    // Wait for 3 RC time constants
-    DelayMS(3 * RC_TIME_CONSTANT);
+    // Wait for 5 RC time constants
+    DelayMS(5 * RC_TIME_CONSTANT);
 
     // Check if the voltage across the capacitor is above 60% of the supply voltage
     if (Vin < V_THRESHOLD) {
@@ -316,15 +317,15 @@ void ConfigureVoltageSourcePin() {
 
     // Configure PC1 as general purpose output
     GPIOC->MODER |= GPIO_MODER_MODER1_0;
-
-    // Configure PC1 as push-pull
-    GPIOC->OTYPER &= ~GPIO_OTYPER_OT_1;
+    // Using a Pull Up Resistor
+    // Configure PC1 as open-drain
+    GPIOC->OTYPER |= GPIO_OTYPER_OT_1;
 
     // Configure PC1 to high speed
     GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR1;
 
-    // Configure PC1 as pull-up
-    GPIOC->PUPDR |= 0x04;
+//    // Configure PC1 as pull-up
+//    GPIOC->PUPDR |= 0x04;
 
 }
 
