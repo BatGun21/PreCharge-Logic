@@ -36,7 +36,8 @@
 /* USER CODE BEGIN PD */
 #define R_PRECHARGE 250 // Precharge resistance in ohms
 #define C_PRECHARGE 1000e-6 // Precharge capacitance in farads
-#define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE) // RC time constant
+#define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE) // RC time constant in secs
+#define DEBOUNCE_DELAY 200  //  Debounce Delay in ms
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -68,6 +69,9 @@ float V_in_arr [5] = {0,0,0,0,0};
 char supplyError [50] = "Critical: Supply is out of Range ";
 char noiseError [50] = "Noise error / Check Connection ";
 char timeOut[50] = "7RC timeout has reached";
+char killSwitch[50] =  "kill switch was pressed";
+volatile uint32_t debounceTimer = 0;
+
 
 /* USER CODE END PV */
 
@@ -76,9 +80,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void DelayMS(int time);
 void SysTick_Init(uint32_t ticks);
-int adc_check (void);
 uint16_t adc_rx(void);
 void adc_init(void);
 void SysTick_Handler(void);
@@ -96,7 +98,8 @@ void sense_V_supply(void);
 void sense_V_in(void);
 float Avg_V_in (void);
 float Avg_V_Supply (void);
-
+void EXTI_Init(void);
+void supplySenseLoop (void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -146,23 +149,9 @@ int main(void)
   adc_init();
   LED_init();
   SysTick_Init(16000);
-  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor)
-
-  do{
-	  sense_V_supply();
-	  avg_v_supply = Avg_V_Supply();
-	  V_threshold = 0.9 * avg_v_supply;
-	  if ((avg_v_supply >= 30) && (avg_v_supply <= 61)){
-		  GPIOC->ODR |= 0x10; // Relay in series with Precharge is ON
-		  DelayMSW(5); // To debounce the relay
-	  }else {
-		  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);
-	  }
-  }while (!((avg_v_supply >= 30) && (avg_v_supply <= 61)));
-
-
-
-
+  EXTI_Init();
+  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor
+  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -172,8 +161,14 @@ int main(void)
 
     /* USER CODE END WHILE */
 	  // If relay in series with Precharge rsistor os On.
-	  Precharge();
-	  Voltage_Print();
+	  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) {
+		  supplySenseLoop();
+	  }else{
+		  Precharge();
+		  Voltage_Print();
+	  }
+
+
 
 
     /* USER CODE BEGIN 3 */
@@ -274,6 +269,48 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void EXTI0_IRQHandler(void) {
+    // Check if the interrupt was triggered by PA0
+    if (EXTI->PR & EXTI_PR_PR0) {
+        if (debounceTimer == 0) {
+            GPIOD->ODR |= 0x2000;
+            GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor)
+            GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
+            while(1){
+            	HAL_UART_Transmit(&huart2, (uint8_t*)killSwitch, strlen(killSwitch), 200);
+            }
+            // Set the debounce timer
+            debounceTimer = DEBOUNCE_DELAY;
+        }
+
+        // Clear the EXTI0 pending flag
+        EXTI->PR = EXTI_PR_PR0;
+    }
+}
+
+void EXTI_Init(void) {
+    // Enable the GPIOA clock
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // Enable SYSCFG clock
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // Configure PA0 as input
+    GPIOA->MODER &= ~GPIO_MODER_MODER0; // Clear bits
+    GPIOA->PUPDR &= ~GPIO_PUPDR_PUPDR0; // No pull-up, no pull-down
+
+    // Connect EXTI0 to PA0
+    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0_Msk;
+
+    // Configure EXTI0 to trigger on rising edge
+    EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on EXTI0
+    EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
+
+    // Enable EXTI0 interrupt in NVIC
+    NVIC_SetPriority(EXTI0_IRQn, 0); // Set priority to 0
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
 float Avg_V_Supply (void){
 	float V_supply = 0;
 	float V_mean = 0;
@@ -302,7 +339,6 @@ float Avg_V_in (void){
 
 }
 
-
 void sense_V_supply(void){
 	uint16_t adcVal = read_adc(9);
 	float V_supply = adcValtoVolts(adcVal);
@@ -314,10 +350,12 @@ void sense_V_supply(void){
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
+			adcVal = read_adc(9);
+			V_supply = adcValtoVolts(adcVal);
+			Voltage_Print();
 		}
 	}
 }
-
 
 void sense_V_in(void){
 	uint16_t adcVal = read_adc(9);
@@ -329,10 +367,11 @@ void sense_V_in(void){
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
+			adcVal = read_adc(9);
+			V_in = adcValtoVolts(adcVal);
 		}
 	}
 }
-
 
 float adcValtoVolts (uint16_t adcVal){
 	float Vin = (adcVal/4096.0)*2.9;
@@ -342,49 +381,12 @@ float adcValtoVolts (uint16_t adcVal){
 	return Vin;
 }
 
-
 void LED_init(void){
-
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN; // Enabling Clock for GPIOD
 	GPIOD->MODER |= GPIO_MODER_MODER14_0; //Set bit 0 to 1 Red
 	GPIOD->MODER |= GPIO_MODER_MODER15_0; //Set bit 0 to 1 Blue
 	GPIOD->MODER |= GPIO_MODER_MODER13_0; //Set bit 0 to 1 Orange
 	GPIOD->MODER |= GPIO_MODER_MODER12_0; //Set bit 0 to 1 Green
-}
-
-
-void switchpressed(void){
-	if((GPIOA->IDR & GPIO_IDR_IDR_0) == GPIO_IDR_IDR_0){
-		 if (switchon){
-			 switchon = 0;
-			 GPIOD->ODR &= 0xefff; //Turns off Green LED
-		 }else{
-			 switchon = 1;
-			 GPIOD->ODR |= 0x1000; //Turns on Green LED
-		 }
-	}
-}
-
-
-void Switch_init (void){
-	  /*----- USER Switch INIT -----*/
-
-    // Enable the GPIO port clock for user switch (assuming it's on GPIOA)
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-
-    // Configure the user switch pin (PA0) as input
-    GPIOA->MODER &= ~GPIO_MODER_MODER0; // Clear bits
-    GPIOA->PUPDR &= ~GPIO_PUPDR_PUPDR0; // No pull-up, no pull-down (floating)
-
-
-//    // Configure EXTI0 to trigger on rising edge
-//    EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
-//    EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on EXTI0
-//
-//
-//    // Enable EXTI0 interrupt in NVIC
-//    NVIC_SetPriority(EXTI0_IRQn, 0); // Set priority to 0 (adjust as needed)
-//    NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
 void Precharge(void) {
@@ -410,6 +412,7 @@ void Precharge(void) {
 	        if (counter>wait2.currentTime+wait2.delayTime){
 	        	HAL_UART_Transmit(&huart2, (uint8_t*)timeOut, strlen(timeOut), 200);
 	        	wait2.activeFlag = 0;
+	        	GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
 	        }
 	    }else {
 	        GPIOC->ODR &= ~(GPIO_ODR_ODR_1); // Turn on the relay
@@ -419,14 +422,6 @@ void Precharge(void) {
 	    }
 	    wait1.activeFlag = 0;
 	}
-
-
-    // Wait for 5 RC time constants
-	  DelayMS(5 * RC_TIME_CONSTANT);
-	  if (!delayActiveFlag){
-
-	  }
-
 }
 
 void ConfigureVoltageSourcePin() {
@@ -452,7 +447,6 @@ void ConfigureVoltageSourcePin() {
 
     // Configure PC4 to high speed
     GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR4;
-
 }
 
 void adc_init(void) {
@@ -483,8 +477,6 @@ void adc_init(void) {
     ADC1->CR2 |= ADC_CR2_SWSTART;
 }
 
-
-
 uint16_t read_adc(uint8_t channel) {
     // Set the channel in the sequence register
     ADC1->SQR3 = (channel & 0x1F);  // Assuming channel is less than 16
@@ -499,28 +491,6 @@ uint16_t read_adc(uint8_t channel) {
     uint16_t result = ADC1->DR;
 
     return result;
-}
-
-int adc_check (void){
-	int check = 0;
-	if ((ADC1->SR & ADC_SR_EOC) == ADC_SR_EOC){
-		check = 1;
-	}
-	return check;
-}
-
-void DelayMS(int time){
-
-	if (!delayActiveFlag){
-		current = counter;
-	}
-
-	if (counter > current + time){
-		delayActiveFlag = 0;
-	}else{
-		delayActiveFlag = 1;
-	}
-
 }
 
 void SysTick_Init(uint32_t ticks){
@@ -557,6 +527,11 @@ void SysTick_Handler(void) {
     } else {
         counter++; // Increment the counter
     }
+
+    if (debounceTimer > 0) {
+        debounceTimer--;
+    }
+
 }
 
 void Voltage_Print(void){
@@ -566,7 +541,6 @@ void Voltage_Print(void){
 	  printTimestamp();
 	  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
 }
-
 
 void printTimestamp(void) {
 	sprintf(msg, " Time = %d ms:", counter);
@@ -587,6 +561,28 @@ float Average(float array[], int size) {
         return 0.0;
     }
     return sum / count;
+}
+
+void EnableInterrupts(void) {
+    // Enable global interrupts
+    __enable_irq();
+    // Enable EXTI0 interrupt
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+void supplySenseLoop (void){
+	  do{
+		  sense_V_supply();
+		  avg_v_supply = Avg_V_Supply();
+		  V_threshold = 0.9 * avg_v_supply;
+		  if ((avg_v_supply >= 30) && (avg_v_supply <= 61)){
+			  GPIOC->ODR &= ~(0x10); // Relay in series with Precharge is ON
+			  DelayMSW(50); // To debounce the relay
+		  }else {
+			  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);
+			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
+		  }
+	  }while (!((avg_v_supply >= 30) && (avg_v_supply <= 61)));
 }
 
 /* USER CODE END 4 */
