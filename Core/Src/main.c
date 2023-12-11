@@ -175,10 +175,6 @@ int main(void)
 	  }else{
 		  Precharge();
 	  }
-
-
-
-
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -351,7 +347,7 @@ void sense_V_supply(void){
 			V_supply_arr[i] = V_supply;
 			i++;
 		}else{
-			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
+			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
 			adcVal = read_adc(ADC_CHANNEL);
 			V_supply = adcValtoVolts(adcVal);
 		}
@@ -367,7 +363,7 @@ void sense_V_in(void){
 			V_in_arr[i] = V_in;
 			i++;
 		}else{
-			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
+			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
 			adcVal = read_adc(ADC_CHANNEL);
 			V_in = adcValtoVolts(adcVal);
 		}
@@ -414,7 +410,7 @@ void Precharge(void) {
 		sense_V_in();
 		avg_V_in = Avg_and_remove_outliers_V_in();
 	    if (avg_V_in < V_threshold) {
-	    	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay (pnp transistor
+	    	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay // This turn off is essential to turn of when the supply is cut off
 	        sprintf(errMsg, "Fatal: Check Connection Vol = %.3f V ", avg_V_in); //Debug
 	        HAL_UART_Transmit(&huart2, (uint8_t*)errMsg, strlen(errMsg), 200);//Debug
 	        GPIOD->ODR |= 0x8000;//Debug LED ON
@@ -542,7 +538,7 @@ void SysTick_Handler(void) {
 
 }
 
-void Voltage_Print(void){
+void Voltage_Print(void){ // Debug
 	  uint16_t adcVal = read_adc(ADC_CHANNEL);
 	  float Vin = adcValtoVolts(adcVal);
 	  sprintf(msg2, " Vol = %.3f V ", Vin);
@@ -587,8 +583,7 @@ void supplySenseLoop (void){
 			  GPIOC->ODR &= ~(0x10); // PreCharge Relay is ON
 			  DelayMSW(50); // Wait for connection to stable
 		  }else {
-			  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);
-			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Precharge Relay Off
+			  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);//Debug
 		  }
 	  }while (!((avg_v_supply >= MIN_SUPPLY_VOLTAGE) && (avg_v_supply <= MAX_SUPPLY_VOLTAGE)));
 }
