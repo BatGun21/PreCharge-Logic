@@ -80,6 +80,9 @@ char noiseError [50] = "Noise error / Check Connection ";
 char timeOut[50] = "7RC timeout has reached";
 char killSwitch[50] =  "kill switch was pressed";
 volatile uint32_t debounceTimer = 0;
+int killSwitchFlag = 0;
+
+
 
 
 /* USER CODE END PV */
@@ -170,10 +173,16 @@ int main(void)
   {
 
     /* USER CODE END WHILE */
-	  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) { // if precharge relay is off
-		  supplySenseLoop();
+
+
+	  if (killSwitchFlag){
+		  while(1);//Halt Operations};
 	  }else{
-		  Precharge();
+		  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) { // if precharge relay is off
+			  supplySenseLoop();
+		  }else{
+			  Precharge();
+		  }
 	  }
     /* USER CODE BEGIN 3 */
   }
@@ -280,7 +289,8 @@ void EXTI0_IRQHandler(void) {
             GPIOD->ODR |= 0x2000;
             GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay
             GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
-            HAL_UART_Transmit(&huart2, (uint8_t*)killSwitch, strlen(killSwitch), 200);
+            killSwitchFlag = 1;
+
         }
         debounceTimer = DEBOUNCE_DELAY;
      }
