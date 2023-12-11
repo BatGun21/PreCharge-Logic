@@ -46,6 +46,10 @@
 #define Variance 2 // in Volts
 #define Clock_Frequency 16000 //KHz
 #define ADC_CHANNEL 9
+#define Port_C GPIOC
+#define Port_D GPIOD
+#define Port_A GPIOA
+
 
 /* USER CODE END PD */
 
@@ -80,7 +84,7 @@ char noiseError [50] = "Noise error / Check Connection ";
 char timeOut[50] = "7RC timeout has reached";
 char killSwitch[50] =  "kill switch was pressed";
 volatile uint32_t debounceTimer = 0;
-int killSwitchFlag = 0;
+int killSwitchFlagRE = 0;
 
 
 
@@ -113,6 +117,7 @@ float Avg_V_Supply (void);
 void EXTI_Init(void);
 void supplySenseLoop (void);
 int time_expired (int delayTime, int currentTime);
+int debounceSwitch(int pin);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -175,7 +180,13 @@ int main(void)
     /* USER CODE END WHILE */
 
 
-	  if (killSwitchFlag){
+	  if (killSwitchFlagRE){
+		  int pin = 0;
+		  pin  = debounceSwitch(GPIOA->IDR & GPIO_IDR_ID0);
+		  if (pin){
+			  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay
+			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
+		  }
 		  while(1);//Halt Operations};
 	  }else{
 		  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) { // if precharge relay is off
@@ -282,17 +293,29 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+int debounceSwitch(int pin){
+	int currPin = 0;
+	int temp = 0;
+	temp = pin;
+	DelayMSW(1);
+	if (pin==temp){
+
+		DelayMSW(1);
+		if (pin==temp){
+		  	currPin = temp;
+		}
+	}else{
+		currPin = pin;
+	}
+	return currPin;
+
+}
+
+
 void EXTI0_IRQHandler(void) {
     // Check if the interrupt was triggered by PA0
     if (EXTI->PR & EXTI_PR_PR0) {
-        if (debounceTimer == 0) {
-            GPIOD->ODR |= 0x2000;
-            GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay
-            GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
-            killSwitchFlag = 1;
-
-        }
-        debounceTimer = DEBOUNCE_DELAY;
+        killSwitchFlagRE = 1;
      }
 
         // Clear the EXTI0 pending flag
