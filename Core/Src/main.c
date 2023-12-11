@@ -339,33 +339,31 @@ float Avg_and_remove_outliers_V_in (void){
 }
 
 void sense_V_supply(void){
-	uint16_t adcVal = read_adc(ADC_CHANNEL);
-	float V_supply = adcValtoVolts(adcVal);
+
 	int i = 0;
 	while (i<Number_of_Samples){
+		uint16_t adcVal = read_adc(ADC_CHANNEL);
+		float V_supply = adcValtoVolts(adcVal);
 		if ((V_supply >= MIN_SUPPLY_VOLTAGE) && (V_supply <= MAX_SUPPLY_VOLTAGE)){
 			V_supply_arr[i] = V_supply;
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
-			adcVal = read_adc(ADC_CHANNEL);
-			V_supply = adcValtoVolts(adcVal);
 		}
 	}
 }
 
 void sense_V_in(void){
-	uint16_t adcVal = read_adc(ADC_CHANNEL);
-	float V_in = adcValtoVolts(adcVal);
+
 	int i = 0;
 	while (i<Number_of_Samples){
+		uint16_t adcVal = read_adc(ADC_CHANNEL);
+		float V_in = adcValtoVolts(adcVal);
 		if ((V_in >= MIN_SENSE_VOLTAGE) && (V_in <= MAX_SENSE_VOLTAGE)){
 			V_in_arr[i] = V_in;
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
-			adcVal = read_adc(ADC_CHANNEL);
-			V_in = adcValtoVolts(adcVal);
 		}
 	}
 }
