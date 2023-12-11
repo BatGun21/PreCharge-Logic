@@ -34,10 +34,19 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define R_PRECHARGE 250 // Precharge resistance in ohms
-#define C_PRECHARGE 1000e-6 // Precharge capacitance in farads
-#define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE) // RC time constant in secs
-#define DEBOUNCE_DELAY 200  //  Debounce Delay in ms
+#define R_PRECHARGE 250 // in ohms
+#define C_PRECHARGE 1000e-6 // in farads
+#define RC_TIME_CONSTANT (R_PRECHARGE * C_PRECHARGE)// in ms
+#define DEBOUNCE_DELAY 200 // in ms
+#define MAX_SUPPLY_VOLTAGE 61 // in Volts
+#define MIN_SUPPLY_VOLTAGE 30 // in Volts
+#define MAX_SENSE_VOLTAGE 61 // in Volts
+#define MIN_SENSE_VOLTAGE 30 // in Volts
+#define Number_of_Samples 5
+#define Variance 2 // in Volts
+#define Clock_Frequency 16000 //KHz
+#define ADC_CHANNEL 9
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -100,6 +109,7 @@ float Avg_V_in (void);
 float Avg_V_Supply (void);
 void EXTI_Init(void);
 void supplySenseLoop (void);
+int time_expired (int delayTime, int currentTime);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -111,8 +121,8 @@ struct Wait {
 
 };
 
-struct Wait wait1 = {0,0,0};
-struct Wait wait2 = {0,0,0};
+struct Wait Three_RC = {0,3*RC_TIME_CONSTANT,0};
+struct Wait Seven_RC = {0,7*RC_TIME_CONSTANT,0};
 /* USER CODE END 0 */
 
 /**
@@ -148,10 +158,10 @@ int main(void)
   ConfigureVoltageSourcePin();
   adc_init();
   LED_init();
-  SysTick_Init(16000);
+  SysTick_Init(Clock_Frequency);
   EXTI_Init();
-  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor
-  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
+  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay (pnp transistor
+  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay (pnp transistor)
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -160,12 +170,10 @@ int main(void)
   {
 
     /* USER CODE END WHILE */
-	  // If relay in series with Precharge rsistor os On.
-	  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) {
+	  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) { // if precharge relay is off
 		  supplySenseLoop();
 	  }else{
 		  Precharge();
-		  Voltage_Print();
 	  }
 
 
@@ -274,18 +282,15 @@ void EXTI0_IRQHandler(void) {
     if (EXTI->PR & EXTI_PR_PR0) {
         if (debounceTimer == 0) {
             GPIOD->ODR |= 0x2000;
-            GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor)
-            GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
-            while(1){
-            	HAL_UART_Transmit(&huart2, (uint8_t*)killSwitch, strlen(killSwitch), 200);
-            }
-            // Set the debounce timer
-            debounceTimer = DEBOUNCE_DELAY;
+            GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay
+            GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
+            HAL_UART_Transmit(&huart2, (uint8_t*)killSwitch, strlen(killSwitch), 200);
         }
+        debounceTimer = DEBOUNCE_DELAY;
+     }
 
         // Clear the EXTI0 pending flag
         EXTI->PR = EXTI_PR_PR0;
-    }
 }
 
 void EXTI_Init(void) {
@@ -311,63 +316,59 @@ void EXTI_Init(void) {
     NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
-float Avg_V_Supply (void){
+float Avg_and_remove_outliers_V_Supply (void){
 	float V_supply = 0;
 	float V_mean = 0;
-	V_mean = Average(V_supply_arr, 5);
-	for (int i = 0; i < 5; i++){
-		if (!(abs(V_mean - V_supply_arr[i]) < 2)){
+	V_mean = Average(V_supply_arr, Number_of_Samples);
+	for (int i = 0; i < Number_of_Samples; i++){
+		if (!(abs(V_mean - V_supply_arr[i]) < Variance)){
 			V_supply_arr[i] = 0.0;
 		}
 	}
-	V_supply = Average(V_supply_arr, 5);
+	V_supply = Average(V_supply_arr, Number_of_Samples);
 	return V_supply;
-
 }
 
-float Avg_V_in (void){
+float Avg_and_remove_outliers_V_in (void){
 	float V_in = 0;
 	float V_mean = 0;
-	V_mean = Average(V_in_arr, 5);
-	for (int i = 0; i < 5; i++){
-		if (!(abs(V_mean - V_in_arr[i]) < 2)){
+	V_mean = Average(V_in_arr, Number_of_Samples);
+	for (int i = 0; i < Number_of_Samples; i++){
+		if (!(abs(V_mean - V_in_arr[i]) < Variance)){
 			V_in_arr[i] = 0.0;
 		}
 	}
-	V_in = Average(V_in_arr, 5);
+	V_in = Average(V_in_arr, Number_of_Samples);
 	return V_in;
-
 }
 
 void sense_V_supply(void){
-	uint16_t adcVal = read_adc(9);
+	uint16_t adcVal = read_adc(ADC_CHANNEL);
 	float V_supply = adcValtoVolts(adcVal);
-	Voltage_Print();
 	int i = 0;
-	while (i<5){
-		if ((V_supply >= 30) && (V_supply <= 61)){
+	while (i<Number_of_Samples){
+		if ((V_supply >= MIN_SUPPLY_VOLTAGE) && (V_supply <= MAX_SUPPLY_VOLTAGE)){
 			V_supply_arr[i] = V_supply;
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
-			adcVal = read_adc(9);
+			adcVal = read_adc(ADC_CHANNEL);
 			V_supply = adcValtoVolts(adcVal);
-			Voltage_Print();
 		}
 	}
 }
 
 void sense_V_in(void){
-	uint16_t adcVal = read_adc(9);
+	uint16_t adcVal = read_adc(ADC_CHANNEL);
 	float V_in = adcValtoVolts(adcVal);
 	int i = 0;
-	while (i<5){
-		if ((V_in >= 0) && (V_in <= 61)){
+	while (i<Number_of_Samples){
+		if ((V_in >= MIN_SENSE_VOLTAGE) && (V_in <= MAX_SENSE_VOLTAGE)){
 			V_in_arr[i] = V_in;
 			i++;
 		}else{
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100);
-			adcVal = read_adc(9);
+			adcVal = read_adc(ADC_CHANNEL);
 			V_in = adcValtoVolts(adcVal);
 		}
 	}
@@ -389,38 +390,46 @@ void LED_init(void){
 	GPIOD->MODER |= GPIO_MODER_MODER12_0; //Set bit 0 to 1 Green
 }
 
+int time_expired (int delayTime, int currentTime){
+	int timeExpiredFlag = 0;
+	if (counter> currentTime+delayTime){
+		timeExpiredFlag = 1;
+	}else{
+		timeExpiredFlag = 0;
+	}
+	return timeExpiredFlag;
+}
+
 void Precharge(void) {
 
-	if (!wait1.activeFlag){
-		wait1.currentTime = counter;
-		wait1.delayTime = 3* RC_TIME_CONSTANT;
-		wait1.activeFlag = 1;
+	if (!Three_RC.activeFlag){
+		Three_RC.currentTime = counter;
+		Three_RC.activeFlag = 1;
 	}
-	if (!wait2.activeFlag){
-		wait2.currentTime = counter;
-		wait2.delayTime = 7* RC_TIME_CONSTANT;
-		wait2.activeFlag = 1;
+	if (!Seven_RC.activeFlag){
+		Seven_RC.currentTime = counter;
+		Seven_RC.activeFlag = 1;
 	}
-	if (counter>wait1.currentTime+wait1.delayTime){
+	if (time_expired(Three_RC.delayTime, Three_RC.currentTime)){
 		sense_V_in();
-		avg_V_in = Avg_V_in();
+		avg_V_in = Avg_and_remove_outliers_V_in();
 	    if (avg_V_in < V_threshold) {
-	    	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the precharge relay (pnp transistor)
-	        sprintf(errMsg, "Error: Check Connection Vol = %.3f V ", avg_V_in);
-	        HAL_UART_Transmit(&huart2, (uint8_t*)errMsg, strlen(errMsg), 200);
-	        GPIOD->ODR |= 0x8000;
-	        if (counter>wait2.currentTime+wait2.delayTime){
-	        	HAL_UART_Transmit(&huart2, (uint8_t*)timeOut, strlen(timeOut), 200);
-	        	wait2.activeFlag = 0;
-	        	GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
+	    	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay (pnp transistor
+	        sprintf(errMsg, "Fatal: Check Connection Vol = %.3f V ", avg_V_in); //Debug
+	        HAL_UART_Transmit(&huart2, (uint8_t*)errMsg, strlen(errMsg), 200);//Debug
+	        GPIOD->ODR |= 0x8000;//Debug LED ON
+	        if (time_expired(Seven_RC.delayTime, Seven_RC.currentTime)){
+	        	HAL_UART_Transmit(&huart2, (uint8_t*)timeOut, strlen(timeOut), 200);//Debug
+	        	Seven_RC.activeFlag = 0;
+	        	GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
 	        }
 	    }else {
-	        GPIOC->ODR &= ~(GPIO_ODR_ODR_1); // Turn on the relay
-	        sprintf(succMsg, "Success: Good Connection Vol = %.3f V ", avg_V_in);
-	        HAL_UART_Transmit(&huart2, (uint8_t*)succMsg, strlen(succMsg), 200);
-	        GPIOD->ODR &= 0xffff7fff;
+	        GPIOC->ODR &= ~(GPIO_ODR_ODR_1); // Turn on the contactor relay
+	        sprintf(succMsg, "Success: Good Connection Vol = %.3f V ", avg_V_in);//Debug
+	        HAL_UART_Transmit(&huart2, (uint8_t*)succMsg, strlen(succMsg), 200);//Debug
+	        GPIOD->ODR &= 0xffff7fff;//Debug LED OFF
 	    }
-	    wait1.activeFlag = 0;
+	    Three_RC.activeFlag = 0;
 	}
 }
 
@@ -482,7 +491,7 @@ uint16_t read_adc(uint8_t channel) {
     ADC1->SQR3 = (channel & 0x1F);  // Assuming channel is less than 16
 
     // Start the conversion
-    ADC1->CR2 |= ADC_CR2_SWSTART;  // Start conversion
+    ADC1->CR2 |= ADC_CR2_SWSTART;
 
     // Wait for the end of conversion
     while (!((ADC1->SR & ADC_SR_EOC) == ADC_SR_EOC)) {}
@@ -509,7 +518,6 @@ void SysTick_Init(uint32_t ticks){
 
 
 	SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk; // Enable SysTick
-
 }
 
 void DelayMSW(unsigned int time){
@@ -535,7 +543,7 @@ void SysTick_Handler(void) {
 }
 
 void Voltage_Print(void){
-	  uint16_t adcVal = read_adc(9);
+	  uint16_t adcVal = read_adc(ADC_CHANNEL);
 	  float Vin = adcValtoVolts(adcVal);
 	  sprintf(msg2, " Vol = %.3f V ", Vin);
 	  printTimestamp();
@@ -573,16 +581,16 @@ void EnableInterrupts(void) {
 void supplySenseLoop (void){
 	  do{
 		  sense_V_supply();
-		  avg_v_supply = Avg_V_Supply();
+		  avg_v_supply = Avg_and_remove_outliers_V_Supply();
 		  V_threshold = 0.9 * avg_v_supply;
-		  if ((avg_v_supply >= 30) && (avg_v_supply <= 61)){
-			  GPIOC->ODR &= ~(0x10); // Relay in series with Precharge is ON
-			  DelayMSW(50); // To debounce the relay
+		  if ((avg_v_supply >= MIN_SUPPLY_VOLTAGE) && (avg_v_supply <= MAX_SUPPLY_VOLTAGE)){
+			  GPIOC->ODR &= ~(0x10); // PreCharge Relay is ON
+			  DelayMSW(50); // Wait for connection to stable
 		  }else {
 			  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);
-			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay in series with precharge resistor (pnp transistor)
+			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Precharge Relay Off
 		  }
-	  }while (!((avg_v_supply >= 30) && (avg_v_supply <= 61)));
+	  }while (!((avg_v_supply >= MIN_SUPPLY_VOLTAGE) && (avg_v_supply <= MAX_SUPPLY_VOLTAGE)));
 }
 
 /* USER CODE END 4 */
