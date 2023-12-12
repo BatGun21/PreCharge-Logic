@@ -46,9 +46,17 @@
 #define Variance 2 // in Volts
 #define Clock_Frequency 16000 //KHz
 #define ADC_CHANNEL 9
-#define Port_C GPIOC
-#define Port_D GPIOD
-#define Port_A GPIOA
+#define GPIO_PORT_PCHG GPIOC
+#define GPIO_PORT_LEDS GPIOD
+#define GPIO_PORT_ADC GPIOB
+#define GPIO_PORT_SWITCH GPIOA
+#define GPIO_PIN_PCHG_RELAY GPIO_ODR_ODR_4
+#define GPIO_PIN_CONTACTOR_RELAY GPIO_ODR_ODR_1
+#define GPIO_PIN_SWITCH GPIO_IDR_ID0
+#define ON 1
+#define OFF 0
+
+
 
 
 /* USER CODE END PD */
@@ -86,9 +94,6 @@ char killSwitch[50] =  "kill switch was pressed";
 volatile uint32_t debounceTimer = 0;
 int killSwitchFlagRE = 0;
 
-
-
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -118,6 +123,8 @@ void EXTI_Init(void);
 void supplySenseLoop (void);
 int time_expired (int delayTime, int currentTime);
 int debounceSwitch(int pin);
+void PreChargeRelayCTRL(int state);
+void ContactorRelayCTRL(int state);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -168,8 +175,8 @@ int main(void)
   LED_init();
   SysTick_Init(Clock_Frequency);
   EXTI_Init();
-  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay (pnp transistor
-  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay (pnp transistor)
+  GPIO_PORT_PCHG->ODR |= GPIO_PIN_CONTACTOR_RELAY;  // Turn off the contactor relay (pnp transistor
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -182,14 +189,16 @@ int main(void)
 
 	  if (killSwitchFlagRE){
 		  int pin = 0;
-		  pin  = debounceSwitch(GPIOA->IDR & GPIO_IDR_ID0);
+		  pin  = debounceSwitch(GPIO_PORT_SWITCH->IDR & GPIO_PIN_SWITCH);
 		  if (pin){
-			  GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay
-			  GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
+			  PreChargeRelayCTRL(OFF);
+			  ContactorRelayCTRL(OFF);
 		  }
-		  while(1);//Halt Operations};
+		  while(1){
+			//Halt Operation
+		  }
 	  }else{
-		  if((GPIOC->ODR & GPIO_ODR_ODR_4)== GPIO_ODR_ODR_4) { // if precharge relay is off
+		  if((GPIO_PORT_PCHG->ODR & GPIO_PIN_PCHG_RELAY)== GPIO_PIN_PCHG_RELAY) {
 			  supplySenseLoop();
 		  }else{
 			  Precharge();
@@ -308,7 +317,6 @@ int debounceSwitch(int pin){
 		currPin = pin;
 	}
 	return currPin;
-
 }
 
 
@@ -330,8 +338,8 @@ void EXTI_Init(void) {
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
     // Configure PA0 as input
-    GPIOA->MODER &= ~GPIO_MODER_MODER0; // Clear bits
-    GPIOA->PUPDR &= ~GPIO_PUPDR_PUPDR0; // No pull-up, no pull-down
+    GPIO_PORT_SWITCH->MODER &= ~GPIO_MODER_MODER0; // Clear bits
+    GPIO_PORT_SWITCH->PUPDR &= ~GPIO_PUPDR_PUPDR0; // No pull-up, no pull-down
 
     // Connect EXTI0 to PA0
     SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0_Msk;
@@ -346,27 +354,35 @@ void EXTI_Init(void) {
 }
 
 float Avg_and_remove_outliers_V_Supply (void){
+
 	float V_supply = 0;
 	float V_mean = 0;
+
 	V_mean = Average(V_supply_arr, Number_of_Samples);
+
 	for (int i = 0; i < Number_of_Samples; i++){
 		if (!(abs(V_mean - V_supply_arr[i]) < Variance)){
 			V_supply_arr[i] = 0.0;
 		}
 	}
+
 	V_supply = Average(V_supply_arr, Number_of_Samples);
 	return V_supply;
 }
 
 float Avg_and_remove_outliers_V_in (void){
+
 	float V_in = 0;
 	float V_mean = 0;
+
 	V_mean = Average(V_in_arr, Number_of_Samples);
+
 	for (int i = 0; i < Number_of_Samples; i++){
 		if (!(abs(V_mean - V_in_arr[i]) < Variance)){
 			V_in_arr[i] = 0.0;
 		}
 	}
+
 	V_in = Average(V_in_arr, Number_of_Samples);
 	return V_in;
 }
@@ -374,14 +390,17 @@ float Avg_and_remove_outliers_V_in (void){
 void sense_V_supply(void){
 
 	int i = 0;
+
 	while (i<Number_of_Samples){
+
 		uint16_t adcVal = read_adc(ADC_CHANNEL);
 		float V_supply = adcValtoVolts(adcVal);
+
 		if ((V_supply >= MIN_SUPPLY_VOLTAGE) && (V_supply <= MAX_SUPPLY_VOLTAGE)){
 			V_supply_arr[i] = V_supply;
 			i++;
 		}else{
-			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
+			HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100); //supply out of range
 		}
 	}
 }
@@ -389,14 +408,17 @@ void sense_V_supply(void){
 void sense_V_in(void){
 
 	int i = 0;
+
 	while (i<Number_of_Samples){
+
 		uint16_t adcVal = read_adc(ADC_CHANNEL);
 		float V_in = adcValtoVolts(adcVal);
+
 		if ((V_in >= MIN_SENSE_VOLTAGE) && (V_in <= MAX_SENSE_VOLTAGE)){
 			V_in_arr[i] = V_in;
 			i++;
 		}else{
-			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //Debug
+			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //For Noise
 		}
 	}
 }
@@ -404,17 +426,16 @@ void sense_V_in(void){
 float adcValtoVolts (uint16_t adcVal){
 	float Vin = (adcVal/4096.0)*2.9;
 	Vin = Vin*(48.0/2.70); //Correction for Voltage divider for 48V
-//	Vin = Vin*(30.0/1.69); //Correction for Voltage divider for 30V
 	Vin += (0.6/30.0)*Vin; //Correction using observation
 	return Vin;
 }
 
 void LED_init(void){
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN; // Enabling Clock for GPIOD
-	GPIOD->MODER |= GPIO_MODER_MODER14_0; //Set bit 0 to 1 Red
-	GPIOD->MODER |= GPIO_MODER_MODER15_0; //Set bit 0 to 1 Blue
-	GPIOD->MODER |= GPIO_MODER_MODER13_0; //Set bit 0 to 1 Orange
-	GPIOD->MODER |= GPIO_MODER_MODER12_0; //Set bit 0 to 1 Green
+	GPIO_PORT_LEDS->MODER |= GPIO_MODER_MODER14_0; //Set bit 0 to 1 Red
+	GPIO_PORT_LEDS->MODER |= GPIO_MODER_MODER15_0; //Set bit 0 to 1 Blue
+	GPIO_PORT_LEDS->MODER |= GPIO_MODER_MODER13_0; //Set bit 0 to 1 Orange
+	GPIO_PORT_LEDS->MODER |= GPIO_MODER_MODER12_0; //Set bit 0 to 1 Green
 }
 
 int time_expired (int delayTime, int currentTime){
@@ -438,23 +459,29 @@ void Precharge(void) {
 		Seven_RC.activeFlag = 1;
 	}
 	if (time_expired(Three_RC.delayTime, Three_RC.currentTime)){
+
 		sense_V_in();
 		avg_V_in = Avg_and_remove_outliers_V_in();
+
 	    if (avg_V_in < V_threshold) {
-	    	GPIOC->ODR |= GPIO_ODR_ODR_1;  // Turn off the contactor relay // This turn off is essential to turn of when the supply is cut off
-	        sprintf(errMsg, "Fatal: Check Connection Vol = %.3f V ", avg_V_in); //Debug
-	        HAL_UART_Transmit(&huart2, (uint8_t*)errMsg, strlen(errMsg), 200);//Debug
-	        GPIOD->ODR |= 0x8000;//Debug LED ON
+
+
+	    	ContactorRelayCTRL(OFF); // Turn off the contactor relay // This turn off is essential to turn of when the supply is cut off
+	        GPIOD->ODR |= 0x8000;//State LED ON
+
+
 	        if (time_expired(Seven_RC.delayTime, Seven_RC.currentTime)){
-	        	HAL_UART_Transmit(&huart2, (uint8_t*)timeOut, strlen(timeOut), 200);//Debug
+
 	        	Seven_RC.activeFlag = 0;
-	        	GPIOC->ODR |= GPIO_ODR_ODR_4;  // Turn off the precharge relay
+	        	PreChargeRelayCTRL(OFF);
+
 	        }
+
 	    }else {
-	        GPIOC->ODR &= ~(GPIO_ODR_ODR_1); // Turn on the contactor relay
-	        sprintf(succMsg, "Success: Good Connection Vol = %.3f V ", avg_V_in);//Debug
-	        HAL_UART_Transmit(&huart2, (uint8_t*)succMsg, strlen(succMsg), 200);//Debug
-	        GPIOD->ODR &= 0xffff7fff;//Debug LED OFF
+
+	        ContactorRelayCTRL(ON);
+	        GPIOD->ODR &= 0xffff7fff;//State LED OFF
+
 	    }
 	    Three_RC.activeFlag = 0;
 	}
@@ -465,24 +492,24 @@ void ConfigureVoltageSourcePin() {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
 
     // Configure PC1 as general purpose output
-    GPIOC->MODER |= GPIO_MODER_MODER1_0;
+    GPIO_PORT_PCHG->MODER |= GPIO_MODER_MODER1_0;
 
     // Configure PC1 as open-drain
-    GPIOC->OTYPER |= GPIO_OTYPER_OT_1;
+    GPIO_PORT_PCHG->OTYPER |= GPIO_OTYPER_OT_1;
     // Using a Pull Up Resistor
 
     // Configure PC1 to high speed
-    GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR1;
+    GPIO_PORT_PCHG->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR1;
 
     // Configure PC4 as general purpose output
-    GPIOC->MODER |= GPIO_MODER_MODER4_0;
+    GPIO_PORT_PCHG->MODER |= GPIO_MODER_MODER4_0;
 
     // Configure PC4 as open-drain
-    GPIOC->OTYPER |= GPIO_OTYPER_OT_4;
+    GPIO_PORT_PCHG->OTYPER |= GPIO_OTYPER_OT_4;
     // Using a Pull Up Resistor
 
     // Configure PC4 to high speed
-    GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR4;
+    GPIO_PORT_PCHG->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR4;
 }
 
 void adc_init(void) {
@@ -493,8 +520,8 @@ void adc_init(void) {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
 
     // Configure PB1 as analog input
-    GPIOB->MODER |= GPIO_MODER_MODER1; // Analog mode
-    GPIOB->OTYPER |= GPIO_OTYPER_OT1; // Open Drain PB1
+    GPIO_PORT_ADC->MODER |= GPIO_MODER_MODER1; // Analog mode
+    GPIO_PORT_ADC->OTYPER |= GPIO_OTYPER_OT1; // Open Drain PB1
 
     // Configure ADC settings
     ADC1->CR1 &= ~ADC_CR1_RES; // Clear the RES bits for 12-bit resolution
@@ -598,25 +625,34 @@ float Average(float array[], int size) {
     return sum / count;
 }
 
-void EnableInterrupts(void) {
-    // Enable global interrupts
-    __enable_irq();
-    // Enable EXTI0 interrupt
-    NVIC_EnableIRQ(EXTI0_IRQn);
-}
 
 void supplySenseLoop (void){
 	  do{
 		  sense_V_supply();
 		  avg_v_supply = Avg_and_remove_outliers_V_Supply();
+
 		  V_threshold = 0.9 * avg_v_supply;
-		  if ((avg_v_supply >= MIN_SUPPLY_VOLTAGE) && (avg_v_supply <= MAX_SUPPLY_VOLTAGE)){
-			  GPIOC->ODR &= ~(0x10); // PreCharge Relay is ON
-			  DelayMSW(50); // Wait for connection to stable
-		  }else {
-			  HAL_UART_Transmit(&huart2, (uint8_t*)supplyError, strlen(supplyError), 100);//Debug
-		  }
+
+		  PreChargeRelayCTRL(ON);
+		  DelayMSW(50); // Wait for connection to stable
+
 	  }while (!((avg_v_supply >= MIN_SUPPLY_VOLTAGE) && (avg_v_supply <= MAX_SUPPLY_VOLTAGE)));
+}
+
+void PreChargeRelayCTRL(int state){
+	if (state){
+		GPIO_PORT_PCHG->ODR &= ~(GPIO_PIN_PCHG_RELAY); // PreCharge Relay is ON
+	}else{
+		GPIO_PORT_PCHG->ODR |= GPIO_PIN_PCHG_RELAY;  // Turn off the precharge relay (pnp transistor)
+	}
+}
+
+void ContactorRelayCTRL(int state){
+	if (state){
+		GPIO_PORT_PCHG->ODR &= ~(GPIO_PIN_CONTACTOR_RELAY); // Turn on the contactor relay
+	}else{
+		GPIO_PORT_PCHG->ODR |= GPIO_PIN_CONTACTOR_RELAY;  // Turn off the Contactor relay (pnp transistor)
+	}
 }
 
 /* USER CODE END 4 */
