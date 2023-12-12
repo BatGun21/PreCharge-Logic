@@ -175,7 +175,8 @@ int main(void)
   LED_init();
   SysTick_Init(Clock_Frequency);
   EXTI_Init();
-  GPIO_PORT_PCHG->ODR |= GPIO_PIN_CONTACTOR_RELAY;  // Turn off the contactor relay (pnp transistor
+  ContactorRelayCTRL(OFF);
+  PreChargeRelayCTRL(OFF);
 
   /* USER CODE END 2 */
 
