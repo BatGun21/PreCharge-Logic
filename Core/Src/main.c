@@ -193,10 +193,11 @@ int main(void)
 		  if (pin){
 			  PreChargeRelayCTRL(OFF);
 			  ContactorRelayCTRL(OFF);
+			  while(1){
+				//Halt Operation
+			  }
 		  }
-		  while(1){
-			//Halt Operation
-		  }
+
 	  }else{
 		  if((GPIO_PORT_PCHG->ODR & GPIO_PIN_PCHG_RELAY)== GPIO_PIN_PCHG_RELAY) {
 			  supplySenseLoop();
