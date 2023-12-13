@@ -419,10 +419,13 @@ void sense_V_in(void){
 
 		if ((V_in >= MIN_SENSE_VOLTAGE) && (V_in <= MAX_SENSE_VOLTAGE)){
 			V_in_arr[i] = V_in;
-			i++;
+
 		}else{
+			V_in_arr[i] = V_in;
 			HAL_UART_Transmit(&huart2, (uint8_t*)noiseError, strlen(noiseError), 100); //For Noise
 		}
+		i++;
+
 	}
 }
 
@@ -466,12 +469,10 @@ void Precharge(void) {
 		sense_V_in();
 		avg_V_in = Avg_and_remove_outliers_V_in();
 
-	    if (avg_V_in < V_threshold) {
-
+	    if (avg_V_in <= V_threshold) {
 
 	    	ContactorRelayCTRL(OFF); // Turn off the contactor relay // This turn off is essential to turn of when the supply is cut off
-	        GPIOD->ODR |= 0x8000;//State LED ON
-
+	        GPIO_PORT_LEDS->ODR &= 0xffff7fff;//State LED OFF
 
 	        if (time_expired(Seven_RC.delayTime, Seven_RC.currentTime)){
 
@@ -483,7 +484,7 @@ void Precharge(void) {
 	    }else {
 
 	        ContactorRelayCTRL(ON);
-	        GPIOD->ODR &= 0xffff7fff;//State LED OFF
+	        GPIO_PORT_LEDS->ODR |= 0x8000;//State LED ON
 
 	    }
 	    Three_RC.activeFlag = 0;
