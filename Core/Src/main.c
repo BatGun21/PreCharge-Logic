@@ -125,6 +125,7 @@ int time_expired (int delayTime, int currentTime);
 int debounceSwitch(int pin);
 void PreChargeRelayCTRL(int state);
 void ContactorRelayCTRL(int state);
+int PreChargeRelayIsOff(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -200,7 +201,7 @@ int main(void)
 		  }
 
 	  }else{
-		  if((GPIO_PORT_PCHG->ODR & GPIO_PIN_PCHG_RELAY)== GPIO_PIN_PCHG_RELAY) {
+		  if(PreChargeRelayIsOff()) {
 			  supplySenseLoop();
 		  }else{
 			  Precharge();
@@ -657,6 +658,14 @@ void ContactorRelayCTRL(int state){
 	}
 }
 
+int PreChargeRelayIsOff(void){
+	int state = 0;
+	if ((GPIO_PORT_PCHG->ODR & GPIO_PIN_PCHG_RELAY)== GPIO_PIN_PCHG_RELAY){
+		state = 1;
+	}
+	return state;
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -673,6 +682,8 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
+
+
 
 #ifdef  USE_FULL_ASSERT
 /**
