@@ -55,10 +55,6 @@
 #define GPIO_PIN_SWITCH GPIO_IDR_ID0
 #define ON 1
 #define OFF 0
-
-
-
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -84,8 +80,8 @@ int V_threshold = 0;
 float avg_v_supply = 0;
 float avg_V_in = 0;
 
-float V_supply_arr [5] = {0,0,0,0,0};
-float V_in_arr [5] = {0,0,0,0,0};
+float V_supply_arr [Number_of_Samples] = {0,0,0,0,0};
+float V_in_arr [Number_of_Samples] = {0,0,0,0,0};
 
 char supplyError [50] = "Critical: Supply is out of Range ";
 char noiseError [50] = "Noise error / Check Connection ";
@@ -491,16 +487,15 @@ void Precharge(void) {
 	}
 }
 
-void ConfigureVoltageSourcePin() {
+void ConfigureVoltageSourcePin(void) {
     // Enable the GPIO port clock
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
 
     // Configure PC1 as general purpose output
     GPIO_PORT_PCHG->MODER |= GPIO_MODER_MODER1_0;
 
-    // Configure PC1 as open-drain
+    // Configure PC1 as open-drain for using a Pull Up Resistor
     GPIO_PORT_PCHG->OTYPER |= GPIO_OTYPER_OT_1;
-    // Using a Pull Up Resistor
 
     // Configure PC1 to high speed
     GPIO_PORT_PCHG->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR1;
@@ -608,7 +603,7 @@ void Voltage_Print(void){ // Debug
 	  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
 }
 
-void printTimestamp(void) {
+void printTimestamp(void) { // Debug
 	sprintf(msg, " Time = %d ms:", counter);
 	HAL_UART_Transmit(&huart2, (uint8_t*)(msg), strlen(msg), 200);
 }
